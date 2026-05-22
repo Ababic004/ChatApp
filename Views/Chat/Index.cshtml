@@ -1,0 +1,368 @@
+@model List<ChatApp.Models.AppUser>
+@{
+    ViewData["Title"] = "Chat";
+    var currentUser = ViewBag.CurrentUser as ChatApp.Models.AppUser;
+    var onlineIds = ViewBag.OnlineIds as HashSet<string> ?? new HashSet<string>();
+    var groups = ViewBag.Groups as List<ChatApp.Models.ChatGroup> ?? new List<ChatApp.Models.ChatGroup>();
+}
+
+<div class="chat-layout">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <span class="fw-bold"><i class="bi bi-chat-dots-fill text-primary me-2"></i>ChatApp</span>
+            <form asp-controller="Account" asp-action="Logout" method="post" class="m-0">
+                @Html.AntiForgeryToken()
+                <button class="btn btn-sm btn-outline-secondary" title="Odjavi se">
+                    <i class="bi bi-box-arrow-right"></i>
+                </button>
+            </form>
+        </div>
+
+        <!-- User info -->
+        <div class="current-user-bar">
+            <div class="avatar avatar-sm bg-primary text-white">@(currentUser?.DisplayName?.FirstOrDefault() ?? 'U')</div>
+            <div>
+                <div class="fw-semibold small">@currentUser?.DisplayName</div>
+                <div class="text-muted" style="font-size:11px">Online</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="sidebar-tabs">
+            <button class="tab-btn active" onclick="switchTab('users')">
+                <i class="bi bi-people"></i> Korisnici
+            </button>
+            <button class="tab-btn" onclick="switchTab('groups')">
+                <i class="bi bi-collection"></i> Grupe
+            </button>
+        </div>
+
+        <!-- Users list -->
+        <div id="tab-users" class="tab-content active">
+            <div class="section-label">Registrovani korisnici</div>
+            <div id="users-list">
+                @foreach (var user in Model)
+                {
+                    var isOnline = onlineIds.Contains(user.Id);
+                    <div class="contact-item" onclick="openPrivateChat('@user.Id', '@user.DisplayName')" data-userid="@user.Id">
+                        <div class="avatar @(isOnline ? "bg-primary" : "bg-secondary") text-white">
+                            @(user.DisplayName?.FirstOrDefault() ?? 'U')
+                        </div>
+                        <div class="flex-grow-1 min-w-0">
+                            <div class="fw-semibold small text-truncate">@user.DisplayName</div>
+                            <div class="text-muted" style="font-size:11px">@user.UserName</div>
+                        </div>
+                        <span class="status-dot @(isOnline ? "online" : "offline")" data-status="@user.Id"></span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Groups list -->
+        <div id="tab-groups" class="tab-content">
+            <div class="section-label d-flex justify-content-between align-items-center">
+                Grupe
+                <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="showCreateGroup()">
+                    <i class="bi bi-plus"></i>
+                </button>
+            </div>
+            <div id="groups-list">
+                @foreach (var group in groups)
+                {
+                    <div class="contact-item" onclick="openGroupChat('@group.Id', '@group.Name')" data-groupid="@group.Id">
+                        <div class="avatar bg-success text-white"><i class="bi bi-people-fill" style="font-size:14px"></i></div>
+                        <div class="flex-grow-1 min-w-0">
+                            <div class="fw-semibold small text-truncate">@group.Name</div>
+                            <div class="text-muted" style="font-size:11px">Grupni chat</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat area -->
+    <div class="chat-area">
+        <!-- Welcome screen -->
+        <div id="welcome-screen" class="welcome-screen">
+            <i class="bi bi-chat-dots display-1 text-primary opacity-50"></i>
+            <h4 class="mt-3 text-muted">Dobrodošli, @currentUser?.DisplayName!</h4>
+            <p class="text-muted">Izaberite korisnika ili grupu sa leve strane da započnete razgovor.</p>
+        </div>
+
+        <!-- Active chat -->
+        <div id="active-chat" class="d-none h-100 d-flex flex-column">
+            <div class="chat-header">
+                <div class="d-flex align-items-center gap-2">
+                    <div id="chat-avatar" class="avatar bg-primary text-white">?</div>
+                    <div>
+                        <div class="fw-semibold" id="chat-name">—</div>
+                        <div class="text-muted small" id="chat-status">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="messages" class="messages-area"></div>
+
+            <div class="chat-input-area">
+                <input type="text" id="message-input" class="form-control" placeholder="Napišite poruku..." />
+                <button class="btn btn-primary" onclick="sendMessage()">
+                    <i class="bi bi-send-fill"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Group Modal -->
+<div class="modal fade" id="createGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 rounded-4 shadow">
+            <div class="modal-header border-0">
+                <h5 class="modal-title fw-bold">Nova grupa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Naziv grupe</label>
+                    <input type="text" id="group-name-input" class="form-control" placeholder="npr. Tim projekat" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Dodaj članove</label>
+                    <div id="member-checkboxes" class="border rounded-3 p-2" style="max-height:200px; overflow-y:auto;">
+                        @foreach (var user in Model)
+                        {
+                            <div class="form-check py-1">
+                                <input class="form-check-input member-check" type="checkbox" value="@user.Id" id="chk-@user.Id" />
+                                <label class="form-check-label small" for="chk-@user.Id">
+                                    @user.DisplayName <span class="text-muted">(@user.UserName)</span>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Otkaži</button>
+                <button type="button" class="btn btn-primary fw-semibold" onclick="createGroup()">Kreiraj grupu</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+const CURRENT_USER_ID = "@currentUser?.Id";
+const CURRENT_USER_NAME = "@currentUser?.DisplayName";
+
+let connection = null;
+let activeChat = null; // { type: 'private'|'group', id, name }
+let createGroupModal = null;
+
+// ─── SignalR connection ───────────────────────────────────────────────────────
+
+async function startConnection() {
+    connection = new signalR.HubConnectionBuilder()
+        .withUrl("/chatHub")
+        .withAutomaticReconnect()
+        .configureLogging(signalR.LogLevel.Warning)
+        .build();
+
+    connection.on("ReceivePrivateMessage", (data) => {
+        if (activeChat?.type === 'private') {
+            const roomPartnerId = activeChat.id;
+            const isRelevant = data.senderId === roomPartnerId || data.recipientId === roomPartnerId;
+            if (isRelevant) appendMessage(data.senderName, data.message, data.senderId === CURRENT_USER_ID, data.timestamp);
+        }
+        if (data.senderId !== CURRENT_USER_ID) showNotification(data.senderName, data.message);
+    });
+
+    connection.on("ReceiveGroupMessage", (data) => {
+        if (activeChat?.type === 'group' && activeChat.id === data.groupId) {
+            appendMessage(data.senderName, data.message, data.senderId === CURRENT_USER_ID, data.timestamp);
+        }
+        if (data.senderId !== CURRENT_USER_ID) showNotification(data.groupName, data.message);
+    });
+
+    connection.on("UserOnline", (userId, displayName) => {
+        setUserStatus(userId, true);
+    });
+
+    connection.on("UserOffline", (userId, displayName) => {
+        setUserStatus(userId, false);
+    });
+
+    connection.on("GroupCreated", (data) => {
+        addGroupToSidebar(data.groupId, data.groupName);
+    });
+
+    try {
+        await connection.start();
+        console.log("SignalR connected");
+    } catch (e) {
+        console.error("SignalR connection failed:", e);
+        setTimeout(startConnection, 3000);
+    }
+}
+
+// ─── Chat actions ─────────────────────────────────────────────────────────────
+
+async function openPrivateChat(userId, displayName) {
+    activeChat = { type: 'private', id: userId, name: displayName };
+
+    // Highlight selected
+    document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+    document.querySelector(`[data-userid="${userId}"]`)?.classList.add('active');
+
+    // Update header
+    document.getElementById('chat-avatar').textContent = displayName[0].toUpperCase();
+    document.getElementById('chat-avatar').className = 'avatar bg-primary text-white';
+    document.getElementById('chat-name').textContent = displayName;
+
+    const statusDot = document.querySelector(`[data-status="${userId}"]`);
+    const isOnline = statusDot?.classList.contains('online');
+    document.getElementById('chat-status').textContent = isOnline ? 'Online' : 'Offline';
+
+    document.getElementById('messages').innerHTML = '';
+    showActiveChat();
+
+    await connection.invoke("JoinPrivateRoom", userId);
+    document.getElementById('message-input').focus();
+}
+
+async function openGroupChat(groupId, groupName) {
+    activeChat = { type: 'group', id: groupId, name: groupName };
+
+    document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+    document.querySelector(`[data-groupid="${groupId}"]`)?.classList.add('active');
+
+    document.getElementById('chat-avatar').innerHTML = '<i class="bi bi-people-fill" style="font-size:14px"></i>';
+    document.getElementById('chat-avatar').className = 'avatar bg-success text-white';
+    document.getElementById('chat-name').textContent = groupName;
+    document.getElementById('chat-status').textContent = 'Grupni chat';
+
+    document.getElementById('messages').innerHTML = '';
+    showActiveChat();
+    document.getElementById('message-input').focus();
+}
+
+async function sendMessage() {
+    const input = document.getElementById('message-input');
+    const text = input.value.trim();
+    if (!text || !activeChat || !connection) return;
+
+    try {
+        if (activeChat.type === 'private') {
+            await connection.invoke("SendPrivateMessage", activeChat.id, text);
+        } else {
+            await connection.invoke("SendGroupMessage", activeChat.id, text);
+        }
+        input.value = '';
+    } catch (e) {
+        console.error("Send failed:", e);
+    }
+}
+
+async function createGroup() {
+    const name = document.getElementById('group-name-input').value.trim();
+    if (!name) { alert('Unesite naziv grupe.'); return; }
+
+    const memberIds = [...document.querySelectorAll('.member-check:checked')].map(c => c.value);
+
+    await connection.invoke("CreateGroup", name, memberIds);
+
+    createGroupModal.hide();
+    document.getElementById('group-name-input').value = '';
+    document.querySelectorAll('.member-check').forEach(c => c.checked = false);
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+
+function appendMessage(sender, text, isMine, time) {
+    const container = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = `message-row ${isMine ? 'mine' : 'theirs'}`;
+    div.innerHTML = `
+        ${!isMine ? `<div class="msg-sender">${escapeHtml(sender)}</div>` : ''}
+        <div class="msg-bubble">${escapeHtml(text)}</div>
+        <div class="msg-time">${time}</div>
+    `;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function showActiveChat() {
+    document.getElementById('welcome-screen').classList.add('d-none');
+    document.getElementById('active-chat').classList.remove('d-none');
+}
+
+function setUserStatus(userId, isOnline) {
+    const dot = document.querySelector(`[data-status="${userId}"]`);
+    if (dot) {
+        dot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
+    }
+    const item = document.querySelector(`[data-userid="${userId}"] .avatar`);
+    if (item) {
+        item.className = `avatar ${isOnline ? 'bg-primary' : 'bg-secondary'} text-white`;
+    }
+    if (activeChat?.type === 'private' && activeChat.id === userId) {
+        document.getElementById('chat-status').textContent = isOnline ? 'Online' : 'Offline';
+    }
+}
+
+function addGroupToSidebar(groupId, groupName) {
+    const list = document.getElementById('groups-list');
+    if (document.querySelector(`[data-groupid="${groupId}"]`)) return;
+    const div = document.createElement('div');
+    div.className = 'contact-item';
+    div.setAttribute('data-groupid', groupId);
+    div.onclick = () => openGroupChat(groupId, groupName);
+    div.innerHTML = `
+        <div class="avatar bg-success text-white"><i class="bi bi-people-fill" style="font-size:14px"></i></div>
+        <div class="flex-grow-1 min-w-0">
+            <div class="fw-semibold small text-truncate">${escapeHtml(groupName)}</div>
+            <div class="text-muted" style="font-size:11px">Grupni chat</div>
+        </div>
+    `;
+    list.appendChild(div);
+}
+
+function showCreateGroup() {
+    if (!createGroupModal) createGroupModal = new bootstrap.Modal(document.getElementById('createGroupModal'));
+    createGroupModal.show();
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    event.currentTarget.classList.add('active');
+}
+
+function showNotification(from, msg) {
+    // Only show if tab not focused
+    if (!document.hasFocus()) {
+        try {
+            new Notification(`${from}`, { body: msg, icon: '/favicon.ico' });
+        } catch {}
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+
+// Enter to send
+document.getElementById('message-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// Start
+startConnection();
+if (Notification.permission === 'default') Notification.requestPermission();
+</script>
+}
